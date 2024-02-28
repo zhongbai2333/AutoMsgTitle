@@ -1,0 +1,13 @@
+{
+  "id": "auto_msg_title",
+  "version": "0.0.1",
+  "name": "AutoMsgTitle",
+  "description": {
+    "en_us": "Auto Send Msg about Some places.",
+    "zh_cn": "在游戏某些区域自动弹出消息。"
+  },
+  "author": "zhongbai233",
+  "link": "https://github.com/zhongbai2333/KookTools",
+  "dependencies": {
+  }
+}
