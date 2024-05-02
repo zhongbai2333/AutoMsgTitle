@@ -33,7 +33,7 @@ jobs:
 
     - uses: actions/upload-artifact@v4
       with:
-        name: Prime Backup distribution for ${{ github.sha }}
+        name: Auto Msg Title distribution for ${{ github.sha }}
         path: package/
 
     - name: Publish distribution to release
