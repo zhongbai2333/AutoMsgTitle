@@ -78,7 +78,7 @@ def on_load(server: PluginServerInterface, _):
     # 加载设置
     config = __mcdr_server.load_config_simple(target_class=Config)
     # 创建命令系统
-    CommandActions(__mcdr_server)
+    CommandActions(__mcdr_server, config.permission)
     if __mcdr_server.is_server_startup():
         getpos_player(True)
 
