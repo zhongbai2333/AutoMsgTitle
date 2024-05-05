@@ -1,5 +1,5 @@
-from mcdreforged.api.all import *
 import time
+from mcdreforged.api.all import *
 
 from .config import Config
 from .command_actions import CommandActions
@@ -18,16 +18,25 @@ def getpos_player(reload: bool = False):
             online_player_list = []
             p_num = 0
             result_pos = rcon_execute("execute as @a run data get entity @s Pos")
-            result_dimension = rcon_execute("execute as @a run data get entity @s Dimension")
+            result_dimension = rcon_execute(
+                "execute as @a run data get entity @s Dimension"
+            )
             # 判断RCON是否有回复
             if result_dimension:
-                n_result_dimension = result_dimension.split("\"")[:-1]
+                n_result_dimension = result_dimension.split('"')[:-1]
                 for i in result_pos.split("]")[:-1]:
                     p_num += 1
                     n_result_pos = i.split()
                     online_player_list.append(n_result_pos[0])
-                    edit_player_info(n_result_pos[0], [int(float(n_result_pos[-3][1:-2])), int(float(n_result_pos[-2][:-2])), int(float(n_result_pos[-1][:-1]))]
-                                     , n_result_dimension[2 * p_num - 1])
+                    edit_player_info(
+                        n_result_pos[0],
+                        [
+                            int(float(n_result_pos[-3][1:-2])),
+                            int(float(n_result_pos[-2][:-2])),
+                            int(float(n_result_pos[-1][:-1])),
+                        ],
+                        n_result_dimension[2 * p_num - 1],
+                    )
                 # 清除不在在线列表的玩家
                 for i in list(set(list(player_info.keys())) - set(online_player_list)):
                     del player_info[i]
@@ -38,16 +47,21 @@ def getpos_player(reload: bool = False):
 def edit_player_info(player_name: str, xyz_now: list, dimension_now: str):
     if player_name in player_info.keys():
         if player_info[player_name][0] == xyz_now:
-            if int(time.time()) - player_info[player_name][2] >= config.afk_time and not player_info[player_name][3]:
+            if (
+                int(time.time()) - player_info[player_name][2] >= config.afk_time
+                and not player_info[player_name][3]
+            ):
                 player_info[player_name][3] = True
                 __mcdr_server.say(f"§7{player_name} 开始 AFK")
         else:
             if player_info[player_name][3]:
-                __mcdr_server.say(f"§7{player_name} 退出 AFK 共用时 {int(time.time()) - player_info[player_name][2]} 秒")
-            player_info[player_name] = [xyz_now,dimension_now,int(time.time()),False]
+                __mcdr_server.say(
+                    f"§7{player_name} 退出 AFK 共用时 {int(time.time()) - player_info[player_name][2]} 秒"
+                )
+            player_info[player_name] = [xyz_now, dimension_now, int(time.time()), False]
     else:
         if config.bot_prefix not in player_name:
-            player_info[player_name] = [xyz_now,dimension_now,int(time.time()),False]
+            player_info[player_name] = [xyz_now, dimension_now, int(time.time()), False]
 
 
 def debug_print(msg: str):
@@ -60,10 +74,12 @@ def rcon_execute(command: str):
     global stop_status
     if __mcdr_server.is_rcon_running():
         result = __mcdr_server.rcon_query(command)
-        if result == '':
+        if result == "":
             result = None
     else:
-        __mcdr_server.logger.error("服务器未启用RCON！插件无法正常工作！请开启之后重载插件！")
+        __mcdr_server.logger.error(
+            "服务器未启用RCON！插件无法正常工作！请开启之后重载插件！"
+        )
         stop_status = True
         result = None
     return result
@@ -98,7 +114,12 @@ def on_server_startup(_):
 def on_player_joined(_, player, __):
     global player_info
     if player not in player_info.keys() and config.bot_prefix not in player:
-        player_info[player] = [[0,0,0],"minecraft:overworld",int(time.time()),False]
+        player_info[player] = [
+            [0, 0, 0],
+            "minecraft:overworld",
+            int(time.time()),
+            False,
+        ]
 
 
 def on_player_left(_, player):
