@@ -31,14 +31,22 @@ class CommandActions:
             self.add_region_3d,
         )
         builder.command("!!amt msg <region_name>", self.region_msg)
-        builder.command("!!amt msg <region_name> addline <line_msg>", self.show_help)
         builder.command(
-            "!!amt msg <region_name> addline <line_msg> <line_number>", self.show_help
+            "!!amt msg <region_name> addline <line_msg>", self.region_msg_addline
         )
-        builder.command("!!amt msg <region_name> delline", self.show_help)
-        builder.command("!!amt msg <region_name> delline <line_number>", self.show_help)
+        builder.command(
+            "!!amt msg <region_name> addline <line_msg> <line_number>",
+            self.region_msg_addline,
+        )
+        builder.command(
+            "!!amt msg <region_name> editline <line_number> <line_msg>",
+            self.region_msg_editline,
+        )
+        builder.command("!!amt msg <region_name> delline", self.region_msg_deline)
+        builder.command(
+            "!!amt msg <region_name> delline <line_number>", self.region_msg_deline
+        )
         builder.command("!!amt del <region_name>", self.del_region)
-        builder.command("!!amt info <region_name>", self.show_help)
 
         builder.arg("page_number", Integer)
         builder.arg("region_name", Text)
@@ -70,6 +78,7 @@ class CommandActions:
 §7{0} add §b<区域名称>§r §e3d <x1> <y1> <z1> <x2> <y2> <z2> <维度id> §6[<大标题>](<小标题>)#<物品栏消息>#<聊天消息>§r 加入一个区域
 §7{0} msg §b<区域名称>§r 显示区域详细的聊天消息
 §7{0} msg §b<区域名称>§r §eaddline <聊天消息> §6[<行数>]§r 添加聊天消息，行数默认最后一行
+§7{0} msg §b<区域名称>§r §eeditline <行数> <聊天消息>§r 编辑聊天消息
 §7{0} msg §b<区域名称>§r §edelline §6[<行数>]§r 删除聊天消息，行数默认最后一行
 §7{0} del §b<区域名称>§r 删除区域，要求全字匹配
 §7{0} info §b<区域名称>§r 显示区域的详情等信息
@@ -127,16 +136,19 @@ class CommandActions:
                 if regions[i]["msg"]["actionbar"]:
                     reload_command += f"#{regions[i]['msg']['actionbar']}#"
                 regions_rtext.append(
-                    f"""区域：从 §a{str(regions[i]['pos']['from'])} §f到 §a{str(regions[i]['pos']['to'])}
-维度：§a{regions[i]['dimension_id']}
+                    f"""区域：从 §a{str(regions[i]['pos']['from'])} §f到 §a{str(regions[i]['pos']['to'])}§r
+维度：§a{regions[i]['dimension_id']}§r
 消息：
- | 标题：§6{regions[i]['msg']['title']}
- | 副标题：§6{regions[i]['msg']['subtitle']}
- | 动作栏：§6{regions[i]['msg']['actionbar']}
+ | 标题：§6{regions[i]['msg']['title']}§r
+ | 副标题：§6{regions[i]['msg']['subtitle']}§r
+ | 动作栏：§6{regions[i]['msg']['actionbar']}§r
  | 消息栏：\n"""
                 )
-                for j in regions[i]["msg"]["msg"]:
-                    regions_rtext.append(f" |  | §6{j}\n")
+                for num, j in enumerate(regions[i]["msg"]["msg"]):
+                    if num < 3:
+                        regions_rtext.append(f" |  | §6{j}\n")
+                    elif num == 3:
+                        regions_rtext.append(" |  | §6...\n")
                     reload_command += f"{j};;"
                 regions_rtext.append("---")
                 regions_rtext.append(
@@ -295,6 +307,35 @@ class CommandActions:
             source.reply(f"成功删除区域 §7{self.ready_del} §r！")
             self.ready_del = ""
 
+    def msg_list(self, context):
+        msg_rtext = RTextList()
+        msg_rtext.append(f"--------- {context['region_name']} ---------\n")
+        for num, i in enumerate(
+            self.data_editor.list()[context["region_name"]]["msg"]["msg"]
+        ):
+            msg_rtext.append(
+                RText(f"{num + 1}. {i}")
+                .c(
+                    RAction.suggest_command,
+                    f"!!amt msg {context['region_name']} editline {num + 1} {i}",
+                )
+                .h("修改此条消息")
+            )
+            msg_rtext.append(
+                RText("§4[✕]§r\n")
+                .c(
+                    RAction.run_command,
+                    f"!!amt msg {context['region_name']} delline {num + 1}",
+                )
+                .h("删除本行")
+            )
+        msg_rtext.append(
+            RText(f"{num + 2}. §a+")
+            .c(RAction.suggest_command, f"!!amt msg {context['region_name']} addline ")
+            .h("添加新行")
+        )
+        return msg_rtext
+
     # msg 命令
     def region_msg(self, source: CommandSource, context: CommandContext):
         if source.get_permission_level() < self.permission["msg"]:
@@ -303,9 +344,62 @@ class CommandActions:
         if context["region_name"] not in self.data_editor.list().keys():
             source.reply(f"§4无法找到区域 {context['region_name']} ！")
             return
-        msg_rtext = RTextList()
-        msg_rtext.append(f"--------- {context['region_name']} ---------\n")
-        for num, i in enumerate(
-            self.data_editor.list()[context["region_name"]]["msg"]["msg"]
-        ):
-            msg_rtext.append(f"{num + 1}. {i}")
+        source.reply(self.msg_list(context))
+
+    # msg addline 命令
+    def region_msg_addline(self, source: CommandSource, context: CommandContext):
+        if source.get_permission_level() < self.permission["msg"]:
+            source.reply(f"§4权限不足！你至少需要 {self.permission['msg']} 级及以上！")
+            return
+        if context["region_name"] not in self.data_editor.list().keys():
+            source.reply(f"§4无法找到区域 {context['region_name']} ！")
+            return
+
+        def addline(msg: str, line_num: int = 0):
+            region = self.data_editor.list()[context["region_name"]]
+            if line_num > 0:
+                region["msg"]["msg"].insert(line_num - 1, msg)
+            else:
+                region["msg"]["msg"].append(msg)
+            return region
+
+        if "line_number" in context.keys():
+            self.data_editor.add(
+                context["region_name"],
+                addline(context["line_msg"], context["line_number"]),
+            )
+        else:
+            self.data_editor.add(
+                context["region_name"],
+                addline(context["line_msg"]),
+            )
+        source.reply(self.msg_list(context))
+
+    # msg editline 命令
+    def region_msg_editline(self, source: CommandSource, context: CommandContext):
+        if source.get_permission_level() < self.permission["msg"]:
+            source.reply(f"§4权限不足！你至少需要 {self.permission['msg']} 级及以上！")
+            return
+        if context["region_name"] not in self.data_editor.list().keys():
+            source.reply(f"§4无法找到区域 {context['region_name']} ！")
+            return
+        region = self.data_editor.list()[context["region_name"]]
+        region["msg"]["msg"][context["line_number"] - 1] = context["line_msg"]
+        self.data_editor.add(context["region_name"], region)
+        source.reply(self.msg_list(context))
+
+    # msg delline 命令
+    def region_msg_deline(self, source: CommandSource, context: CommandContext):
+        if source.get_permission_level() < self.permission["msg"]:
+            source.reply(f"§4权限不足！你至少需要 {self.permission['msg']} 级及以上！")
+            return
+        if context["region_name"] not in self.data_editor.list().keys():
+            source.reply(f"§4无法找到区域 {context['region_name']} ！")
+            return
+        region = self.data_editor.list()[context["region_name"]]
+        if "line_number" in context.keys():
+            region["msg"]["msg"].pop(context["line_number"] - 1)
+        else:
+            region["msg"]["msg"].pop()
+        self.data_editor.add(context["region_name"], region)
+        source.reply(self.msg_list(context))
