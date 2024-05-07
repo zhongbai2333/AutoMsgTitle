@@ -15,4 +15,5 @@ class Config(Serializable):
     }
     debug: bool = False
     afk_time: int = 300
+    back_region: int = 30
     bot_prefix: str = "bot_"

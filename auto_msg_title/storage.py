@@ -1,10 +1,13 @@
 import json
 import os
 
+global global_data_json
 
 class JsonDataEditor:
     def __init__(self, filepath="./config/data.json"):
+        global global_data_json
         self.filepath = filepath
+        global_data_json = self._read_data()
         # 检查文件是否存在，如果不存在则创建空的JSON文件
         if not os.path.exists(filepath):
             self._write_data({})
@@ -25,10 +28,12 @@ class JsonDataEditor:
 
     def add(self, key, value):
         """向 JSON 文件中添加新的数据项"""
+        global global_data_json
         if not os.path.exists(self.filepath):
             self._write_data({})
         data = self._read_data()
         data[key] = value
+        global_data_json = data
         self._write_data(data)
 
     def remove(self, key):

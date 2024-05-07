@@ -1,4 +1,5 @@
 import time
+from typing import List, Tuple
 from mcdreforged.api.all import *
 
 from .config import Config
@@ -7,61 +8,145 @@ from .command_actions import CommandActions
 global __mcdr_server, player_info, stop_status, online_player_list
 
 
-# 创建新线程
 @new_thread("GetPos")
 def getpos_player(reload: bool = False):
+    # 全局变量声明
     global player_info, online_player_list
     time.sleep(1)
+
+    # 持续运行直到外部stop_status变量指示停止
     while not stop_status:
-        # 判断服务器是否有人
+        # 如果有在线玩家信息或者触发了重载
         if player_info or reload:
-            online_player_list = []
-            p_num = 0
-            result_pos = rcon_execute("execute as @a run data get entity @s Pos")
-            result_dimension = rcon_execute(
-                "execute as @a run data get entity @s Dimension"
-            )
-            # 判断RCON是否有回复
-            if result_dimension:
-                n_result_dimension = result_dimension.split('"')[:-1]
-                for i in result_pos.split("]")[:-1]:
-                    p_num += 1
-                    n_result_pos = i.split()
-                    online_player_list.append(n_result_pos[0])
-                    edit_player_info(
-                        n_result_pos[0],
-                        [
-                            int(float(n_result_pos[-3][1:-2])),
-                            int(float(n_result_pos[-2][:-2])),
-                            int(float(n_result_pos[-1][:-1])),
-                        ],
-                        n_result_dimension[2 * p_num - 1],
-                    )
-                # 清除不在在线列表的玩家
-                for i in list(set(list(player_info.keys())) - set(online_player_list)):
-                    del player_info[i]
+            update_player_positions()
+        # 重置重载标志
         reload = False
         time.sleep(1)
 
 
-def edit_player_info(player_name: str, xyz_now: list, dimension_now: str):
-    if player_name in player_info.keys():
-        if player_info[player_name][0] == xyz_now:
+def update_player_positions():
+    global online_player_list
+    online_player_list = []
+    # 执行RCON命令获取所有玩家的位置
+    result_pos = rcon_execute("execute as @a run data get entity @s Pos")
+    # 执行RCON命令获取所有玩家的维度
+    result_dimension = rcon_execute("execute as @a run data get entity @s Dimension")
+
+    # 如果获取维度成功
+    if result_dimension:
+        dimensions = parse_dimensions(result_dimension)
+        update_player_info_from_results(result_pos, dimensions)
+
+
+def parse_dimensions(raw_dimension_data: str) -> List[str]:
+    # 解析维度数据
+    return raw_dimension_data.split('"')[:-1]
+
+
+def update_player_info_from_results(position_data: str, dimensions: List[str]):
+    online_player_names = []
+
+    # 解析位置信息
+    for player_count, position_info in enumerate(position_data.split("]")[:-1]):
+        name, xyz = parse_position_info(position_info)
+        online_player_names.append(name)
+        xyz_as_int = list(map(lambda coord: int(float(coord)), xyz))
+        dimension = dimensions[2 * (player_count + 1) - 1]
+        edit_player_info(name, xyz_as_int, dimension)
+
+    # 清除不再在线的玩家信息
+    clear_offline_players(online_player_names)
+
+
+def parse_position_info(position_info: str) -> Tuple[str, List[str]]:
+    parts = position_info.split()
+    player_name = parts[0]
+    xyz = [parts[-3][1:-2], parts[-2][:-2], parts[-1][:-1]]
+    return player_name, xyz
+
+
+def clear_offline_players(online_player_names: List[str]):
+    # 对于不在在线列表中的玩家，从全局信息中删除
+    for player in set(player_info.keys()) - set(online_player_names):
+        del player_info[player]
+
+
+def is_player_in_any_region(xyz, dimension):
+    from .storage import global_data_json
+
+    px, py, pz = xyz
+    for region_name, region_data in global_data_json.items():
+        if dimension != region_data["dimension_id"]:
+            continue
+
+        # 判断 2D 还是 3D
+        if region_data["shape"] == 0:  # 2D
+            x1, z1 = region_data["pos"]["from"]
+            x2, z2 = region_data["pos"]["to"]
+            # Check if player is within the 2D x-z plane bounds
+            if min(x1, x2) <= px <= max(x1, x2) and min(z1, z2) <= pz <= max(z1, z2):
+                return region_name
+        elif region_data["shape"] == 1:  # 3D
+            x1, y1, z1 = region_data["pos"]["from"]
+            x2, y2, z2 = region_data["pos"]["to"]
+            # Check if player is within the 3D x-y-z volume
             if (
-                int(time.time()) - player_info[player_name][2] >= config.afk_time
-                and not player_info[player_name][3]
+                min(x1, x2) <= px <= max(x1, x2)
+                and min(y1, y2) <= py <= max(y1, y2)
+                and min(z1, z2) <= pz <= max(z1, z2)
             ):
-                player_info[player_name][3] = True
+                return region_name
+    return None
+
+
+def edit_player_info(player_name: str, xyz_now: List[int], dimension_now: str):
+    current_time = int(time.time())
+    player_data = player_info.get(
+        player_name,
+        {
+            "position": None,
+            "dimension": None,
+            "last_update_time": current_time,
+            "is_afk": False,
+            "last_enter_time": 0,
+            "in_region": None,
+        },
+    )
+
+    in_region_now = is_player_in_any_region(xyz_now, dimension_now)
+    if (
+        current_time - player_data["last_enter_time"] > config.back_region
+        and in_region_now
+    ):
+        print_title(in_region_now, player_name)
+
+    # 检查玩家位置是否未变更
+    if player_data["position"] == xyz_now:
+        if current_time - player_data["last_update_time"] >= config.afk_time:
+            if not player_data["is_afk"]:
+                player_data["is_afk"] = True
                 __mcdr_server.say(f"§7{player_name} 开始 AFK")
-        else:
-            if player_info[player_name][3]:
-                __mcdr_server.say(
-                    f"§7{player_name} 退出 AFK 共用时 {int(time.time()) - player_info[player_name][2]} 秒"
-                )
-            player_info[player_name] = [xyz_now, dimension_now, int(time.time()), False]
     else:
-        if config.bot_prefix not in player_name:
-            player_info[player_name] = [xyz_now, dimension_now, int(time.time()), False]
+        if player_data["is_afk"]:
+            __mcdr_server.say(
+                f"§7{player_name} 退出 AFK 共用时 {current_time - player_data['last_update_time']} 秒"
+            )
+        player_data["position"] = xyz_now
+        player_data["dimension"] = dimension_now
+        player_data["last_update_time"] = current_time
+        player_data["is_afk"] = False
+        player_data["last_enter_time"] = (
+            current_time if in_region_now else player_data["last_enter_time"]
+        )
+        player_data["in_region"] = in_region_now
+
+    player_info[player_name] = player_data
+
+
+def print_title(region_name, player_name):
+    from .storage import global_data_json
+
+    region_msg = global_data_json.get(region_name).get("msg")
 
 
 def debug_print(msg: str):
@@ -114,12 +199,14 @@ def on_server_startup(_):
 def on_player_joined(_, player, __):
     global player_info
     if player not in player_info.keys() and config.bot_prefix not in player:
-        player_info[player] = [
-            [0, 0, 0],
-            "minecraft:overworld",
-            int(time.time()),
-            False,
-        ]
+        player_info[player] = {
+            "position": None,
+            "dimension": None,
+            "last_update_time": int(time.time()),
+            "is_afk": False,
+            "last_enter_time": 0,
+            "in_region": None,
+        }
 
 
 def on_player_left(_, player):
