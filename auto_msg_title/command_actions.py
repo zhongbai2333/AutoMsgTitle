@@ -289,6 +289,7 @@ class CommandActions:
     def msg_list(self, context):
         msg_rtext = RTextList()
         msg_rtext.append(f"--------- {context['region_name']} ---------\n")
+        num = -1
         for num, i in enumerate(
             self.data_editor.list()[context["region_name"]]["msg"]["msg"]
         ):

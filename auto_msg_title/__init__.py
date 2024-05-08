@@ -18,19 +18,19 @@ def getpos_player(reload: bool = False):
     while not stop_status:
         # 如果有在线玩家信息或者触发了重载
         if player_info or reload:
-            update_player_positions()
+            # 执行RCON命令获取所有玩家的位置
+            result_pos = rcon_execute("execute as @a run data get entity @s Pos")
+            # 执行RCON命令获取所有玩家的维度
+            result_dimension = rcon_execute("execute as @a run data get entity @s Dimension")
+            update_player_positions(result_pos, result_dimension)
         # 重置重载标志
         reload = False
         time.sleep(1)
 
 
-def update_player_positions():
+def update_player_positions(result_pos, result_dimension):
     global online_player_list
     online_player_list = []
-    # 执行RCON命令获取所有玩家的位置
-    result_pos = rcon_execute("execute as @a run data get entity @s Pos")
-    # 执行RCON命令获取所有玩家的维度
-    result_dimension = rcon_execute("execute as @a run data get entity @s Dimension")
 
     # 如果获取维度成功
     if result_dimension:
@@ -110,13 +110,15 @@ def edit_player_info(player_name: str, xyz_now: List[int], dimension_now: str):
             "is_afk": False,
             "last_enter_time": 0,
             "in_region": None,
+            "last_region": None,
         },
     )
 
     in_region_now = is_player_in_any_region(xyz_now, dimension_now)
     if (
-        current_time - player_data["last_enter_time"] > config.back_region
-        and in_region_now
+        (current_time - player_data["last_enter_time"] > config.back_region
+        and in_region_now)
+        or (player_data["last_region"] != in_region_now and in_region_now)
     ):
         print_title(in_region_now, player_name)
 
@@ -139,14 +141,29 @@ def edit_player_info(player_name: str, xyz_now: List[int], dimension_now: str):
             current_time if in_region_now else player_data["last_enter_time"]
         )
         player_data["in_region"] = in_region_now
+        player_data["last_region"] = (
+            in_region_now if in_region_now else player_data["last_region"]
+        )
 
     player_info[player_name] = player_data
+    debug_print(f"PlayerData: {player_data}")
 
 
 def print_title(region_name, player_name):
     from .storage import global_data_json
 
-    region_msg = global_data_json.get(region_name).get("msg")
+    region_msg = global_data_json[region_name]["msg"]
+    rcon_execute("gamerule sendCommandFeedback false")
+    if region_msg['title']:
+        rcon_execute(f"title {player_name} title \"{region_msg['title']}\"")
+        if region_msg['subtitle']:
+            rcon_execute(f"title {player_name} subtitle \"{region_msg['subtitle']}\"")
+    if region_msg['actionbar']:
+        rcon_execute(f"title {player_name} actionbar \"{region_msg['actionbar']}\"")
+    rcon_execute("gamerule sendCommandFeedback true")
+    if region_msg['msg']:
+        for i in region_msg['msg']:
+            __mcdr_server.tell(player_name, i)
 
 
 def debug_print(msg: str):
@@ -206,6 +223,7 @@ def on_player_joined(_, player, __):
             "is_afk": False,
             "last_enter_time": 0,
             "in_region": None,
+            "last_region": None,
         }
 
 
