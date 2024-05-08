@@ -1,72 +1,169 @@
-import re
-from mcdreforged.api.all import *
 import time
+from typing import List, Tuple
+from mcdreforged.api.all import *
 
 from .config import Config
+from .command_actions import CommandActions
 
 global __mcdr_server, player_info, stop_status, online_player_list
 
 
 @new_thread("GetPos")
 def getpos_player(reload: bool = False):
+    # 全局变量声明
     global player_info, online_player_list
     time.sleep(1)
+
+    # 持续运行直到外部stop_status变量指示停止
     while not stop_status:
+        # 如果有在线玩家信息或者触发了重载
         if player_info or reload:
-            online_player_list = []
-            result = rcon_execute(f"execute as @a run data get entity @s Pos")
-            debug_print(player_info)
-            if result:
-                for i in result.split("]")[:-1]:
-                    n_result = i.split()
-                    online_player_list.append(n_result[0])
-                    edit_player_info(n_result[0], [int(float(n_result[-3][1:-2])), int(float(n_result[-2][:-2])), int(float(n_result[-1][:-1]))])
-                for i in list(set(list(player_info.keys())) - set(online_player_list)):
-                    del player_info[i]
+            # 执行RCON命令获取所有玩家的位置
+            result_pos = rcon_execute("execute as @a run data get entity @s Pos")
+            # 执行RCON命令获取所有玩家的维度
+            result_dimension = rcon_execute("execute as @a run data get entity @s Dimension")
+            update_player_positions(result_pos, result_dimension)
+        # 重置重载标志
         reload = False
         time.sleep(1)
 
 
-def edit_player_info(player_name: str, xyz_now: list):
-    if player_name in player_info.keys():
-        if player_info[player_name][0] == xyz_now:
-            if int(time.time()) - player_info[player_name][1] >= config.afk_time and not player_info[player_name][2]:
-                player_info[player_name][2] = True
+def update_player_positions(result_pos, result_dimension):
+    global online_player_list
+    online_player_list = []
+
+    # 如果获取维度成功
+    if result_dimension:
+        dimensions = parse_dimensions(result_dimension)
+        update_player_info_from_results(result_pos, dimensions)
+
+
+def parse_dimensions(raw_dimension_data: str) -> List[str]:
+    # 解析维度数据
+    return raw_dimension_data.split('"')[:-1]
+
+
+def update_player_info_from_results(position_data: str, dimensions: List[str]):
+    online_player_names = []
+
+    # 解析位置信息
+    for player_count, position_info in enumerate(position_data.split("]")[:-1]):
+        name, xyz = parse_position_info(position_info)
+        online_player_names.append(name)
+        xyz_as_int = list(map(lambda coord: int(float(coord)), xyz))
+        dimension = dimensions[2 * (player_count + 1) - 1]
+        edit_player_info(name, xyz_as_int, dimension)
+
+    # 清除不再在线的玩家信息
+    clear_offline_players(online_player_names)
+
+
+def parse_position_info(position_info: str) -> Tuple[str, List[str]]:
+    parts = position_info.split()
+    player_name = parts[0]
+    xyz = [parts[-3][1:-2], parts[-2][:-2], parts[-1][:-1]]
+    return player_name, xyz
+
+
+def clear_offline_players(online_player_names: List[str]):
+    # 对于不在在线列表中的玩家，从全局信息中删除
+    for player in set(player_info.keys()) - set(online_player_names):
+        del player_info[player]
+
+
+def is_player_in_any_region(xyz, dimension):
+    from .storage import global_data_json
+
+    px, py, pz = xyz
+    for region_name, region_data in global_data_json.items():
+        if dimension != region_data["dimension_id"]:
+            continue
+
+        # 判断 2D 还是 3D
+        if region_data["shape"] == 0:  # 2D
+            x1, z1 = region_data["pos"]["from"]
+            x2, z2 = region_data["pos"]["to"]
+            # Check if player is within the 2D x-z plane bounds
+            if min(x1, x2) <= px <= max(x1, x2) and min(z1, z2) <= pz <= max(z1, z2):
+                return region_name
+        elif region_data["shape"] == 1:  # 3D
+            x1, y1, z1 = region_data["pos"]["from"]
+            x2, y2, z2 = region_data["pos"]["to"]
+            # Check if player is within the 3D x-y-z volume
+            if (
+                min(x1, x2) <= px <= max(x1, x2)
+                and min(y1, y2) <= py <= max(y1, y2)
+                and min(z1, z2) <= pz <= max(z1, z2)
+            ):
+                return region_name
+    return None
+
+
+def edit_player_info(player_name: str, xyz_now: List[int], dimension_now: str):
+    current_time = int(time.time())
+    player_data = player_info.get(
+        player_name,
+        {
+            "position": None,
+            "dimension": None,
+            "last_update_time": current_time,
+            "is_afk": False,
+            "last_enter_time": 0,
+            "in_region": None,
+            "last_region": None,
+        },
+    )
+
+    in_region_now = is_player_in_any_region(xyz_now, dimension_now)
+    if (
+        (current_time - player_data["last_enter_time"] > config.back_region
+        and in_region_now)
+        or (player_data["last_region"] != in_region_now and in_region_now)
+    ):
+        print_title(in_region_now, player_name)
+
+    # 检查玩家位置是否未变更
+    if player_data["position"] == xyz_now:
+        if current_time - player_data["last_update_time"] >= config.afk_time:
+            if not player_data["is_afk"]:
+                player_data["is_afk"] = True
                 __mcdr_server.say(f"§7{player_name} 开始 AFK")
-        else:
-            if player_info[player_name][2]:
-                __mcdr_server.say(f"§7{player_name} 退出 AFK 共用时 {int(time.time()) - player_info[player_name][1]} 秒")
-            player_info[player_name] = [xyz_now,int(time.time()),False]
     else:
-        if config.bot_prefix not in player_name:
-            player_info[player_name] = [xyz_now,int(time.time()),False]
+        if player_data["is_afk"]:
+            __mcdr_server.say(
+                f"§7{player_name} 退出 AFK 共用时 {current_time - player_data['last_update_time']} 秒"
+            )
+        player_data["position"] = xyz_now
+        player_data["dimension"] = dimension_now
+        player_data["last_update_time"] = current_time
+        player_data["is_afk"] = False
+        player_data["last_enter_time"] = (
+            current_time if in_region_now else player_data["last_enter_time"]
+        )
+        player_data["in_region"] = in_region_now
+        player_data["last_region"] = (
+            in_region_now if in_region_now else player_data["last_region"]
+        )
+
+    player_info[player_name] = player_data
+    debug_print(f"PlayerData: {player_data}")
 
 
-def show_help(source: CommandSource):
-	help_msg_lines = '''
---------- MCDR 自动消息插件 v{2} ---------
-一个用于在一个区域自动显示题目或消息的插件
-§7{0}§r 显示此帮助信息
-§7{0} list §6[<可选页号>]§r 列出所有消息区域
-§7{0} add §b<区域名称> §e2d <x1> <z1> <x2> <z2> <维度id> §6[<大标题>](<小标题>)#<物品栏消息>#<聊天消息>§r 加入一个区域
-§7{0} add §b<区域名称> §e3d <x1> <y1> <z1> <x2> <y2> <z2> <维度id> §6[<大标题>](<小标题>)#<物品栏消息>#<聊天消息>§r 加入一个区域
-§7{0} msg §b<区域名称>§r 显示区域详细的聊天消息
-§7{0} msg §b<区域名称>§r §eaddline <聊天消息> <行数> 添加聊天消息，行数默认最后一行
-§7{0} msg §b<区域名称>§r §delline <行数> 删除聊天消息，行数默认最后一行
-§7{0} del §b<区域名称>§r 删除区域，要求全字匹配
-§7{0} info §b<区域名称>§r 显示区域的详情等信息
-其中：
-当§6可选页号§r被指定时，将以每{1}个路标为一页，列出指定页号的路标
-§3关键字§r以及§b区域名称§r为不包含空格的一个字符串，或者一个被""括起的字符串
-'''.format("!!amt", 1, __mcdr_server.get_self_metadata().version).splitlines(True)
-	help_msg_rtext = RTextList()
-	for line in help_msg_lines:
-		result = re.search(r'(?<=§7)!!amt[\w ]*(?=§)', line)
-		if result is not None:
-			help_msg_rtext.append(RText(line).c(RAction.suggest_command, result.group()).h('点击以填入 §7{}§r'.format(result.group())))
-		else:
-			help_msg_rtext.append(line)
-	source.reply(help_msg_rtext)
+def print_title(region_name, player_name):
+    from .storage import global_data_json
+
+    region_msg = global_data_json[region_name]["msg"]
+    rcon_execute("gamerule sendCommandFeedback false")
+    if region_msg['title']:
+        rcon_execute(f"title {player_name} title \"{region_msg['title']}\"")
+        if region_msg['subtitle']:
+            rcon_execute(f"title {player_name} subtitle \"{region_msg['subtitle']}\"")
+    if region_msg['actionbar']:
+        rcon_execute(f"title {player_name} actionbar \"{region_msg['actionbar']}\"")
+    rcon_execute("gamerule sendCommandFeedback true")
+    if region_msg['msg']:
+        for i in region_msg['msg']:
+            __mcdr_server.tell(player_name, i)
 
 
 def debug_print(msg: str):
@@ -79,28 +176,35 @@ def rcon_execute(command: str):
     global stop_status
     if __mcdr_server.is_rcon_running():
         result = __mcdr_server.rcon_query(command)
-        if result == '':
+        if result == "":
             result = None
     else:
-        __mcdr_server.logger.error("服务器未启用RCON！插件无法正常工作！请开启之后重载插件！")
+        __mcdr_server.logger.error(
+            "服务器未启用RCON！插件无法正常工作！请开启之后重载插件！"
+        )
         stop_status = True
         result = None
     return result
 
 
+# 插件入口
 def on_load(server: PluginServerInterface, _):
-    global __mcdr_server, player_info, stop_status, config
+    global __mcdr_server, player_info, stop_status, config, command_actions
     __mcdr_server = server
     player_info = {}
     stop_status = False
+    # 加载设置
     config = __mcdr_server.load_config_simple(target_class=Config)
-    create_command()
+    # 创建命令系统
+    CommandActions(__mcdr_server, config.permission)
     if __mcdr_server.is_server_startup():
         getpos_player(True)
 
 
+# 插件卸载
 def on_unload(_):
     global stop_status
+    # 退出信号
     stop_status = True
 
 
@@ -112,17 +216,18 @@ def on_server_startup(_):
 def on_player_joined(_, player, __):
     global player_info
     if player not in player_info.keys() and config.bot_prefix not in player:
-        player_info[player] = [[0,0,0],int(time.time()),False]
+        player_info[player] = {
+            "position": None,
+            "dimension": None,
+            "last_update_time": int(time.time()),
+            "is_afk": False,
+            "last_enter_time": 0,
+            "in_region": None,
+            "last_region": None,
+        }
 
 
 def on_player_left(_, player):
     global player_info
     if player in player_info.keys():
         del player_info[player]
-
-
-def create_command():
-    __mcdr_server.register_command(
-        Literal("!!amt").
-        runs(show_help)
-    )
