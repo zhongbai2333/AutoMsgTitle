@@ -47,6 +47,7 @@ class CommandActions:
             "!!amt msg <region_name> delline <line_number>", self.region_msg_deline
         )
         builder.command("!!amt del <region_name>", self.del_region)
+        builder.command("!!amt move <region_name> <region_number>", self.move_region)
 
         builder.arg("page_number", Integer)
         builder.arg("region_name", Text)
@@ -60,6 +61,7 @@ class CommandActions:
         builder.arg("msg", GreedyText)
         builder.arg("line_msg", Text)
         builder.arg("line_number", Integer)
+        builder.arg("region_number", Integer)
 
         builder.register(self.__mcdr_server)
 
@@ -76,12 +78,12 @@ class CommandActions:
 §7{0} list §6[<可选页号>]§r 列出所有消息区域
 §7{0} add §b<区域名称>§r §e2d <x1> <z1> <x2> <z2> <维度id> §6[<大标题>](<小标题>)#<物品栏消息>#<聊天消息>§r 加入一个区域
 §7{0} add §b<区域名称>§r §e3d <x1> <y1> <z1> <x2> <y2> <z2> <维度id> §6[<大标题>](<小标题>)#<物品栏消息>#<聊天消息>§r 加入一个区域
+§7{0} move §b<区域名称>§r §e<序号>§r 移动区域的序号，当区域重叠时，在先的区域优先级高
 §7{0} msg §b<区域名称>§r 显示区域详细的聊天消息
 §7{0} msg §b<区域名称>§r §eaddline <聊天消息> §6[<行数>]§r 添加聊天消息，行数默认最后一行
 §7{0} msg §b<区域名称>§r §eeditline <行数> <聊天消息>§r 编辑聊天消息
 §7{0} msg §b<区域名称>§r §edelline §6[<行数>]§r 删除聊天消息，行数默认最后一行
 §7{0} del §b<区域名称>§r 删除区域，要求全字匹配
-§7{0} info §b<区域名称>§r 显示区域的详情等信息
 其中：
 小标题必须跟随大标题显示
 当§6可选页号§r被指定时，将以每{1}个路标为一页，列出指定页号的路标
@@ -179,6 +181,12 @@ class CommandActions:
                 RText("§7[↺]§r")
                 .c(RAction.suggest_command, reload_command[:-2])
                 .h("重新键入 §7!!amt add §r命令")
+            )
+            regions_rtext.append("---")
+            regions_rtext.append(
+                RText("§b[⇌]§r")
+                .c(RAction.suggest_command, f"!!amt move {name} ")
+                .h("修改这个区域的序号，键入 §7!!amt move §r命令")
             )
             regions_rtext.append("---")
             regions_rtext.append(
@@ -383,3 +391,19 @@ class CommandActions:
             region["msg"]["msg"].pop()
         self.data_editor.add(context["region_name"], region)
         source.reply(self.msg_list(context))
+
+    # move 命令
+    def move_region(self, source: CommandSource, context: CommandContext):
+        if not source.has_permission_higher_than(self.permission["move"]):
+            source.reply(f"§4权限不足！你至少需要 {self.permission['move']} 级及以上！")
+            return
+        if context["region_name"] not in self.data_editor.list().keys():
+            source.reply(f"§4无法找到区域 {context['region_name']} ！")
+            return
+        if context["region_number"] - 1 >= 0:
+            self.data_editor.move(context["region_name"], context["region_number"] - 1)
+            source.reply(
+                f"已将区域 §7{context['region_name']} §r移至 §7{context['region_number']}"
+            )
+        else:
+            source.reply("§4序列号不能小于 1 ！")

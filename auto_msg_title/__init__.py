@@ -25,7 +25,7 @@ def getpos_player(reload: bool = False):
             update_player_positions(result_pos, result_dimension)
         # 重置重载标志
         reload = False
-        time.sleep(1)
+        time.sleep(config.refresh_pos_time)
 
 
 def update_player_positions(result_pos, result_dimension):
@@ -56,6 +56,7 @@ def update_player_info_from_results(position_data: str, dimensions: List[str]):
 
     # 清除不再在线的玩家信息
     clear_offline_players(online_player_names)
+    debug_print(f"PlayerInfo: {player_info}")
 
 
 def parse_position_info(position_info: str) -> Tuple[str, List[str]]:
@@ -108,19 +109,9 @@ def edit_player_info(player_name: str, xyz_now: List[int], dimension_now: str):
             "dimension": None,
             "last_update_time": current_time,
             "is_afk": False,
-            "last_enter_time": 0,
-            "in_region": None,
-            "last_region": None,
+            "last_region": {},
         },
     )
-
-    in_region_now = is_player_in_any_region(xyz_now, dimension_now)
-    if (
-        (current_time - player_data["last_enter_time"] > config.back_region
-        and in_region_now)
-        or (player_data["last_region"] != in_region_now and in_region_now)
-    ):
-        print_title(in_region_now, player_name)
 
     # 检查玩家位置是否未变更
     if player_data["position"] == xyz_now:
@@ -129,38 +120,43 @@ def edit_player_info(player_name: str, xyz_now: List[int], dimension_now: str):
                 player_data["is_afk"] = True
                 __mcdr_server.say(f"§7{player_name} 开始 AFK")
     else:
+        # 区域检查
+        last_region = player_data["last_region"]
+        in_region_now = is_player_in_any_region(xyz_now, dimension_now)
+        if in_region_now not in last_region.keys() and in_region_now:
+            print_title(in_region_now, player_name)
+        for i in list(last_region.keys()):
+            if current_time - last_region[i] > config.back_region:
+                del last_region[i]
+        if in_region_now:
+            last_region[in_region_now] = current_time
+
+        # AFK 检查
         if player_data["is_afk"]:
             __mcdr_server.say(
                 f"§7{player_name} 退出 AFK 共用时 {current_time - player_data['last_update_time']} 秒"
             )
+
+        # 更新变量
         player_data["position"] = xyz_now
         player_data["dimension"] = dimension_now
         player_data["last_update_time"] = current_time
         player_data["is_afk"] = False
-        player_data["last_enter_time"] = (
-            current_time if in_region_now else player_data["last_enter_time"]
-        )
-        player_data["in_region"] = in_region_now
-        player_data["last_region"] = (
-            in_region_now if in_region_now else player_data["last_region"]
-        )
+        player_data["last_region"] = last_region
 
     player_info[player_name] = player_data
-    debug_print(f"PlayerData: {player_data}")
 
 
 def print_title(region_name, player_name):
     from .storage import global_data_json
 
     region_msg = global_data_json[region_name]["msg"]
-    rcon_execute("gamerule sendCommandFeedback false")
     if region_msg['title']:
         rcon_execute(f"title {player_name} title \"{region_msg['title']}\"")
         if region_msg['subtitle']:
             rcon_execute(f"title {player_name} subtitle \"{region_msg['subtitle']}\"")
     if region_msg['actionbar']:
         rcon_execute(f"title {player_name} actionbar \"{region_msg['actionbar']}\"")
-    rcon_execute("gamerule sendCommandFeedback true")
     if region_msg['msg']:
         for i in region_msg['msg']:
             __mcdr_server.tell(player_name, i)
@@ -179,9 +175,10 @@ def rcon_execute(command: str):
         if result == "":
             result = None
     else:
-        __mcdr_server.logger.error(
-            "服务器未启用RCON！插件无法正常工作！请开启之后重载插件！"
-        )
+        if not stop_status:
+            __mcdr_server.logger.error(
+                "服务器未启用RCON或服务器核心已关闭！"
+            )
         stop_status = True
         result = None
     return result
@@ -209,6 +206,7 @@ def on_unload(_):
 
 
 def on_server_startup(_):
+    stop_status = False
     getpos_player()
 
 
@@ -221,9 +219,7 @@ def on_player_joined(_, player, __):
             "dimension": None,
             "last_update_time": int(time.time()),
             "is_afk": False,
-            "last_enter_time": 0,
-            "in_region": None,
-            "last_region": None,
+            "last_region": {},
         }
 
 

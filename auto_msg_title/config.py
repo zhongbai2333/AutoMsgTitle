@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Dict, Tuple
 
 from mcdreforged.api.all import Serializable
 
@@ -10,10 +10,12 @@ class Config(Serializable):
         "list": 0,
         "add": 3,
         "del": 3,
+        "move": 2,
         "msg": 2,
         "info": 1,
     }
     debug: bool = False
-    afk_time: int = 300
-    back_region: int = 30
+    afk_time: float = 300  # second
+    back_region: float = 30  # second
+    refresh_pos_time: float = 1 # second
     bot_prefix: str = "bot_"
