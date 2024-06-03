@@ -1,17 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="3fb9c2c6-1b2b-4e2f-8ad2-c58b1b45289d" name="更改" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/AutoMsgTitle.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/auto_msg_title/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/auto_msg_title/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/auto_msg_title/command_actions.py" beforeDir="false" afterPath="$PROJECT_DIR$/auto_msg_title/command_actions.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/auto_msg_title/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/auto_msg_title/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/auto_msg_title/storage.py" beforeDir="false" afterPath="$PROJECT_DIR$/auto_msg_title/storage.py" afterDir="false" />
-    </list>
+    <list default="true" id="3fb9c2c6-1b2b-4e2f-8ad2-c58b1b45289d" name="更改" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -35,7 +25,7 @@
   "keyToString": {
     "ASKED_ADD_EXTERNAL_FILES": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "dev",
+    "git-widget-placeholder": "master",
     "nodejs_package_manager_path": "npm",
     "settings.editor.selected.configurable": "preferences.lookFeel",
     "vue.rearranger.settings.migration": "true"
@@ -59,6 +49,7 @@
       <updated>1714879949648</updated>
       <workItem from="1714879950803" duration="28000" />
       <workItem from="1714879985777" duration="234000" />
+      <workItem from="1717214305397" duration="82000" />
     </task>
     <servers />
   </component>
