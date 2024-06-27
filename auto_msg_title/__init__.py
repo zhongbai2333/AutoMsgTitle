@@ -186,7 +186,7 @@ def rcon_execute(command: str):
 
 # 插件入口
 def on_load(server: PluginServerInterface, _):
-    global __mcdr_server, player_info, stop_status, config, command_actions
+    global __mcdr_server, player_info, stop_status, config
     __mcdr_server = server
     player_info = {}
     stop_status = False
