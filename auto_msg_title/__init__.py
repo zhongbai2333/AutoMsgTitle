@@ -152,11 +152,11 @@ def print_title(region_name, player_name):
 
     region_msg = global_data_json[region_name]["msg"]
     if region_msg['title']:
-        rcon_execute(f"title {player_name} title \"{region_msg['title']}\"")
+        rcon_execute(f"title \"{player_name}\" title \"{region_msg['title']}\"")
         if region_msg['subtitle']:
-            rcon_execute(f"title {player_name} subtitle \"{region_msg['subtitle']}\"")
+            rcon_execute(f"title \"{player_name}\" subtitle \"{region_msg['subtitle']}\"")
     if region_msg['actionbar']:
-        rcon_execute(f"title {player_name} actionbar \"{region_msg['actionbar']}\"")
+        rcon_execute(f"title \"{player_name}\" actionbar \"{region_msg['actionbar']}\"")
     if region_msg['msg']:
         for i in region_msg['msg']:
             __mcdr_server.tell(player_name, i)
