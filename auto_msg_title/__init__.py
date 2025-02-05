@@ -8,6 +8,13 @@ from .command_actions import CommandActions
 global __mcdr_server, player_info, stop_status, online_player_list
 
 
+def get_player_info() -> dict:
+    """
+    获取当前服务器上所有玩家的信息，包括ID、名称和位置等。
+    """
+    return player_info
+
+
 @new_thread("GetPos")
 def getpos_player(reload: bool = False):
     # 全局变量声明
