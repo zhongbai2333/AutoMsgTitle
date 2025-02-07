@@ -5,7 +5,14 @@ from mcdreforged.api.all import *
 from .config import Config
 from .command_actions import CommandActions
 
-global __mcdr_server, player_info, stop_status, online_player_list
+global __mcdr_server, player_info, stop_status
+
+
+def get_player_info() -> dict:
+    """
+    获取当前服务器上所有玩家的信息，包括ID、名称和位置等。
+    """
+    return player_info
 
 
 @new_thread("GetPos")
@@ -21,7 +28,9 @@ def getpos_player(reload: bool = False):
             # 执行RCON命令获取所有玩家的位置
             result_pos = rcon_execute("execute as @a run data get entity @s Pos")
             # 执行RCON命令获取所有玩家的维度
-            result_dimension = rcon_execute("execute as @a run data get entity @s Dimension")
+            result_dimension = rcon_execute(
+                "execute as @a run data get entity @s Dimension"
+            )
             update_player_positions(result_pos, result_dimension)
         # 重置重载标志
         reload = False
@@ -29,9 +38,6 @@ def getpos_player(reload: bool = False):
 
 
 def update_player_positions(result_pos, result_dimension):
-    global online_player_list
-    online_player_list = []
-
     # 如果获取维度成功
     if result_dimension:
         dimensions = parse_dimensions(result_dimension)
@@ -151,14 +157,16 @@ def print_title(region_name, player_name):
     from .storage import global_data_json
 
     region_msg = global_data_json[region_name]["msg"]
-    if region_msg['title']:
-        rcon_execute(f"title {player_name} title \"{region_msg['title']}\"")
-        if region_msg['subtitle']:
-            rcon_execute(f"title {player_name} subtitle \"{region_msg['subtitle']}\"")
-    if region_msg['actionbar']:
-        rcon_execute(f"title {player_name} actionbar \"{region_msg['actionbar']}\"")
-    if region_msg['msg']:
-        for i in region_msg['msg']:
+    if region_msg["title"]:
+        rcon_execute(f"title \"{player_name}\" title \"{region_msg['title']}\"")
+        if region_msg["subtitle"]:
+            rcon_execute(
+                f"title \"{player_name}\" subtitle \"{region_msg['subtitle']}\""
+            )
+    if region_msg["actionbar"]:
+        rcon_execute(f"title \"{player_name}\" actionbar \"{region_msg['actionbar']}\"")
+    if region_msg["msg"]:
+        for i in region_msg["msg"]:
             __mcdr_server.tell(player_name, i)
 
 
@@ -176,9 +184,7 @@ def rcon_execute(command: str):
             result = None
     else:
         if not stop_status:
-            __mcdr_server.logger.error(
-                "服务器未启用RCON或服务器核心已关闭！"
-            )
+            __mcdr_server.logger.error("服务器未启用RCON或服务器核心已关闭！")
         stop_status = True
         result = None
     return result
@@ -186,7 +192,7 @@ def rcon_execute(command: str):
 
 # 插件入口
 def on_load(server: PluginServerInterface, _):
-    global __mcdr_server, player_info, stop_status, config, command_actions
+    global __mcdr_server, player_info, stop_status, config
     __mcdr_server = server
     player_info = {}
     stop_status = False
@@ -206,6 +212,8 @@ def on_unload(_):
 
 
 def on_server_startup(_):
+    global stop_status
+    # 退出信号
     stop_status = False
     getpos_player()
 

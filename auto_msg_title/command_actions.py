@@ -3,7 +3,7 @@ from mcdreforged.api.all import *
 
 
 class CommandActions:
-    def __init__(self, mcdr_server, permission) -> None:
+    def __init__(self, mcdr_server: PluginServerInterface, permission) -> None:
         from .storage import JsonDataEditor
 
         self.__mcdr_server = mcdr_server
