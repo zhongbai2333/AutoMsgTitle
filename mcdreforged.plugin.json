@@ -8,6 +8,8 @@
   },
   "author": "zhongbai233",
   "link": "https://github.com/zhongbai2333/AutoMsgTitle",
+  "entrypoint": "auto_msg_title.entry",
   "dependencies": {
+    "zhongbais_data_api": "*"
   }
 }

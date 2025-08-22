@@ -45,7 +45,7 @@ class JsonDataEditor:
 
     def remove(self, key):
         """从 JSON 文件中删除数据项"""
-        from .__init__ import debug_print
+        from .entry import debug_print
 
         data = self._read_data()
         if key in data:

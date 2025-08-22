@@ -1,14 +1,35 @@
 import re
 from mcdreforged.api.all import *
+from .tools import amt_to_section, section_to_amt
 
 
 class CommandActions:
-    def __init__(self, mcdr_server: PluginServerInterface, permission) -> None:
+    def __init__(self, mcdr_server: PluginServerInterface, permission, get_player_state=None) -> None:
         from .storage import JsonDataEditor
 
         self.__mcdr_server = mcdr_server
         self.permission = permission
+        # 获取玩家状态的回调：传入玩家名，返回 { position: [x,y,z], dimension: str } 或 None
+        self._get_player_state = get_player_state
+        # 记录玩家“上次标记”的坐标与维度
+        self._marks = {}
         self.ready_del = ""
+        # 每页显示条数
+        self._PAGE_SIZE = 5
+        # 原版维度别名映射到规范ID
+        self._VANILLA_DIM_ALIASES = {
+            "0": "minecraft:overworld",
+            "overworld": "minecraft:overworld",
+            "minecraft:overworld": "minecraft:overworld",
+            "1": "minecraft:the_nether",
+            "nether": "minecraft:the_nether",
+            "the_nether": "minecraft:the_nether",
+            "minecraft:the_nether": "minecraft:the_nether",
+            "2": "minecraft:the_end",
+            "end": "minecraft:the_end",
+            "the_end": "minecraft:the_end",
+            "minecraft:the_end": "minecraft:the_end",
+        }
         self.create_command()
         self.data_editor = JsonDataEditor(
             f"{self.__mcdr_server.get_data_folder()}/data.json"
@@ -19,9 +40,30 @@ class CommandActions:
     def create_command(self):
         builder = SimpleCommandBuilder()
 
+        # 顶级帮助与列表
         builder.command("!!amt", self.show_help)
         builder.command("!!amt list", self.regions_list)
         builder.command("!!amt list <page_number>", self.regions_list)
+
+        # 标记与基于标记创建区域
+        builder.command("!!amt mark", self.mark_here)
+        # 新命名：addmark
+        builder.command("!!amt addmark 2d <region_name> <msg>", self.add_from_mark_2d)
+        builder.command("!!amt addmark 3d <region_name> <msg>", self.add_from_mark_3d)
+        # 兼容旧命令名
+        builder.command("!!amt add_from_mark 2d <region_name> <msg>", self.add_from_mark_2d)
+        builder.command("!!amt add_from_mark 3d <region_name> <msg>", self.add_from_mark_3d)
+
+        # 可视化边界
+        builder.command("!!amt viz on", self.viz_on)
+        builder.command("!!amt viz off", self.viz_off)
+        builder.command("!!amt viz all", self.viz_all)
+        builder.command("!!amt viz region <region_name>", self.viz_region)
+
+        # 标记管理
+        builder.command("!!amt clearmark", self.clear_mark)
+
+        # 直接添加区域
         builder.command(
             "!!amt add <region_name> 2d <x1> <z1> <x2> <z2> <dimension_id> <msg>",
             self.add_region_2d,
@@ -30,25 +72,20 @@ class CommandActions:
             "!!amt add <region_name> 3d <x1> <y1> <z1> <x2> <y2> <z2> <dimension_id> <msg>",
             self.add_region_3d,
         )
+
+        # 消息编辑
         builder.command("!!amt msg <region_name>", self.region_msg)
-        builder.command(
-            "!!amt msg <region_name> addline <line_msg>", self.region_msg_addline
-        )
-        builder.command(
-            "!!amt msg <region_name> addline <line_msg> <line_number>",
-            self.region_msg_addline,
-        )
-        builder.command(
-            "!!amt msg <region_name> editline <line_number> <line_msg>",
-            self.region_msg_editline,
-        )
+        builder.command("!!amt msg <region_name> addline <line_msg>", self.region_msg_addline)
+        builder.command("!!amt msg <region_name> addline <line_msg> <line_number>", self.region_msg_addline)
+        builder.command("!!amt msg <region_name> editline <line_number> <line_msg>", self.region_msg_editline)
         builder.command("!!amt msg <region_name> delline", self.region_msg_deline)
-        builder.command(
-            "!!amt msg <region_name> delline <line_number>", self.region_msg_deline
-        )
+        builder.command("!!amt msg <region_name> delline <line_number>", self.region_msg_deline)
+
+        # 删除 / 移动
         builder.command("!!amt del <region_name>", self.del_region)
         builder.command("!!amt move <region_name> <region_number>", self.move_region)
 
+        # 参数定义
         builder.arg("page_number", Integer)
         builder.arg("region_name", Text)
         builder.arg("x1", Integer)
@@ -63,11 +100,11 @@ class CommandActions:
         builder.arg("line_number", Integer)
         builder.arg("region_number", Integer)
 
+        # 注册命令
         builder.register(self.__mcdr_server)
 
-        self.__mcdr_server.register_help_message(
-            "!!amt", "获取AutoMsgTitle插件帮助列表"
-        )
+        # 帮助入口
+        self.__mcdr_server.register_help_message("!!amt", "获取AutoMsgTitle插件帮助列表")
 
     # help 列表
     def show_help(self, source: CommandSource):
@@ -76,6 +113,13 @@ class CommandActions:
 一个用于在一个区域自动显示题目或消息的插件
 §7{0}§r 显示此帮助信息
 §7{0} list §6[<可选页号>]§r 列出所有消息区域
+§7{0} viz on/off§r 打开/关闭你自己的区域边界可视化
+§7{0} viz all§r 显示全部区域边界（仅在你当前维度）
+§7{0} viz region §b<区域名称>§r 仅显示该区域边界
+§7{0} mark§r 记录你当前脚下坐标（保存到会话内，仅自己可见）
+§7{0} clearmark§r 清除你当前脚下坐标的记录
+§7{0} addmark §e2d <区域名称> <消息>§r 基于你当前坐标与上次记录在当前维度创建 2D 区域（兼容旧命令名 add_from_mark）
+§7{0} addmark §e3d <区域名称> <消息>§r 基于你当前坐标与上次记录在当前维度创建 3D 区域（兼容旧命令名 add_from_mark）
 §7{0} add §b<区域名称>§r §e2d <x1> <z1> <x2> <z2> <维度id> §6[<大标题>](<小标题>)#<物品栏消息>#<聊天消息>§r 加入一个区域
 §7{0} add §b<区域名称>§r §e3d <x1> <y1> <z1> <x2> <y2> <z2> <维度id> §6[<大标题>](<小标题>)#<物品栏消息>#<聊天消息>§r 加入一个区域
 §7{0} move §b<区域名称>§r §e<序号>§r 移动区域的序号，当区域重叠时，在先的区域优先级高
@@ -87,9 +131,10 @@ class CommandActions:
 其中：
 小标题必须跟随大标题显示
 当§6可选页号§r被指定时，将以每{1}个路标为一页，列出指定页号的路标
+维度ID示例（原版）：§6overworld/nether/end§r 或 §60/1/2§r，或完整ID §6minecraft:overworld§r / §6minecraft:the_nether§r / §6minecraft:the_end§r；亦支持模组/自定义维度（例如 §6some_mod:custom_dim§r）
 §3关键字§r以及§b区域名称§r为不包含空格的一个字符串，或者一个被""括起的字符串
 """.format(
-            "!!amt", 5, self.__mcdr_server.get_self_metadata().version
+            "!!amt", self._PAGE_SIZE, self.__mcdr_server.get_self_metadata().version
         ).splitlines(
             True
         )
@@ -115,13 +160,16 @@ class CommandActions:
 
         # 获取区域数据
         regions = self.data_editor.list()
+        if not regions:
+            source.reply("暂无任何区域，使用 §7!!amt add§r 添加一个吧！")
+            return
         if context:
             page_number = context["page_number"]
         else:
             page_number = 1  # 默认显示第一页
 
         # 分页处理
-        max_page = (len(regions) + 4) // 5  # 每页显示5个，计算最大页数
+        max_page = (len(regions) + self._PAGE_SIZE - 1) // self._PAGE_SIZE  # 计算最大页数
         if page_number < 1:
             source.reply("已经是第一页了！")
             return
@@ -135,10 +183,11 @@ class CommandActions:
 
     def get_regions_rtext(self, regions: dict, page: int):
         regions_rtext = RTextList()
-        start_index = (page - 1) * 5
-        end_index = start_index + 5
+        total_pages = max(1, (len(regions) + self._PAGE_SIZE - 1) // self._PAGE_SIZE)
+        start_index = (page - 1) * self._PAGE_SIZE
+        end_index = start_index + self._PAGE_SIZE
 
-        regions_rtext.append(f"--------- 区域列表 第 §6{page}/{(len(regions) + 4) // 5} §f页 ---------\n")
+        regions_rtext.append(f"--------- 区域列表 第 §6{page}/{total_pages} §f页 ---------\n")
         items = list(regions.items())[start_index:min(end_index, len(regions))]
 
         for num, (name, details) in enumerate(items, start=start_index + 1):
@@ -153,26 +202,29 @@ class CommandActions:
 
             # 组装 reload_command
             reload_command = f"!!amt add {name} {shape_text.lower()} {position_from} {position_to} {dimension_id} "
-            if details["msg"]["title"]:
-                reload_command += f"[{details['msg']['title']}]"
-            if details["msg"]["subtitle"]:
-                reload_command += f"({details['msg']['subtitle']})"
-            if details["msg"]["actionbar"]:
-                reload_command += f"#{details['msg']['actionbar']}#"
+            disp_title = section_to_amt(details["msg"].get("title", ""))
+            disp_subtitle = section_to_amt(details["msg"].get("subtitle", ""))
+            disp_actionbar = section_to_amt(details["msg"].get("actionbar", ""))
+            if disp_title:
+                reload_command += f"[{disp_title}]"
+            if disp_subtitle:
+                reload_command += f"({disp_subtitle})"
+            if disp_actionbar:
+                reload_command += f"#{disp_actionbar}#"
             message_lines = details["msg"]["msg"]
             for line in message_lines:
-                reload_command += f"{line};;"
+                reload_command += f"{section_to_amt(line)};;"
 
             regions_rtext.append(
                 f"""消息：
- | 标题：§6{details['msg']['title']}§r
- | 副标题：§6{details['msg']['subtitle']}§r
- | 动作栏：§6{details['msg']['actionbar']}§r
+ | 标题：§6{disp_title}§r
+ | 副标题：§6{disp_subtitle}§r
+ | 动作栏：§6{disp_actionbar}§r
  | 消息栏：\n"""
             )
             for num, msg in enumerate(message_lines):
                 if num < 3:
-                    regions_rtext.append(f" |  | §6{msg}\n")
+                    regions_rtext.append(f" |  | §6{section_to_amt(msg)}\n")
                 elif num == 3:
                     regions_rtext.append(" |  | §6...\n")
 
@@ -207,13 +259,157 @@ class CommandActions:
             regions_rtext.append(
                 RText("<<").c(RAction.run_command, f"!!amt list {page - 1}").h("前一页")
             )
-        regions_rtext.append(f" 第 §6{page}/{(len(regions) + 4) // 5} §f页 ")
-        if page < (len(regions) + 4) // 5:
+        regions_rtext.append(f" 第 §6{page}/{total_pages} §f页 ")
+        if page < total_pages:
             regions_rtext.append(
                 RText(">>").c(RAction.run_command, f"!!amt list {page + 1}").h("后一页")
             )
         regions_rtext.append(" ---------")
         return regions_rtext
+
+    # ===== 可视化命令处理 =====
+    def _viz_guard(self, source: CommandSource):
+        if not source.is_player:
+            source.reply("§4该命令只能由玩家在游戏内执行！")
+            return False
+        # 使用可视化专用权限
+        if not source.has_permission_higher_than(self.permission.get("viz", 0)):
+            source.reply(f"§4权限不足！你至少需要 {self.permission.get('viz', 0)} 级及以上！")
+            return False
+        return True
+
+    def viz_on(self, source: CommandSource):
+        if not self._viz_guard(source):
+            return
+        from .entry import viz_set_viewer
+        viz_set_viewer(source.player, None)
+        source.reply("已开启可视化（当前维度：全部区域）")
+
+    def viz_off(self, source: CommandSource):
+        if not self._viz_guard(source):
+            return
+        from .entry import viz_remove_viewer
+        viz_remove_viewer(source.player)
+        source.reply("已关闭可视化")
+
+    def viz_all(self, source: CommandSource):
+        if not self._viz_guard(source):
+            return
+        from .entry import viz_set_viewer
+        viz_set_viewer(source.player, None)
+        source.reply("显示全部区域边界（当前维度）")
+
+    def viz_region(self, source: CommandSource, context: CommandContext):
+        if not self._viz_guard(source):
+            return
+        if context["region_name"] not in self.data_editor.list().keys():
+            source.reply(f"§4无法找到区域 {context['region_name']} ！")
+            return
+        from .entry import viz_set_viewer
+        viz_set_viewer(source.player, context["region_name"])
+        source.reply(f"仅显示区域 §7{context['region_name']} §r 的边界（当前维度）")
+
+    # 记录当前脚下坐标
+    def mark_here(self, source: CommandSource):
+        if not source.is_player:
+            source.reply("§4该命令只能由玩家在游戏内执行！")
+            return
+        # 使用标记专用权限
+        if not source.has_permission_higher_than(self.permission.get("mark", 0)):
+            source.reply(f"§4权限不足！你至少需要 {self.permission.get('mark', 0)} 级及以上！")
+            return
+        if self._get_player_state is None:
+            source.reply("§4未能获取玩家坐标，请检查数据源配置！")
+            return
+        name = source.player
+        state = self._get_player_state(name) or {}
+        pos = state.get("position")
+        dim = state.get("dimension")
+        if not pos or dim is None:
+            source.reply("§4未获取到你的当前位置，请稍后重试")
+            return
+        self._marks[name] = {"pos": pos, "dim": dim}
+        try:
+            from .entry import mark_set
+            mark_set(name, pos, dim)
+        except Exception:
+            pass
+        source.reply(f"已记录当前位置：§a{pos[0]} {pos[1]} {pos[2]}§r 维度：§6{dim}§r")
+
+    def clear_mark(self, source: CommandSource):
+        if not source.is_player:
+            source.reply("§4该命令只能由玩家在游戏内执行！")
+            return
+        # 使用标记专用权限
+        if not source.has_permission_higher_than(self.permission.get("mark", 0)):
+            source.reply(f"§4权限不足！你至少需要 {self.permission.get('mark', 0)} 级及以上！")
+            return
+        name = source.player
+        if name in self._marks:
+            del self._marks[name]
+        try:
+            from .entry import mark_clear
+            mark_clear(name)
+        except Exception:
+            pass
+        source.reply("已清除你的标记点")
+
+    def _add_from_mark(self, source: CommandSource, context: CommandContext, dim_type: str):
+        if not source.is_player:
+            source.reply("§4该命令只能由玩家在游戏内执行！")
+            return
+        if not source.has_permission_higher_than(self.permission["add"]):
+            source.reply(f"§4权限不足！你至少需要 {self.permission['add']} 级及以上！")
+            return
+        if self._get_player_state is None:
+            source.reply("§4未能获取玩家坐标，请检查数据源配置！")
+            return
+        name = source.player
+        mark = self._marks.get(name)
+        if not mark:
+            source.reply("§4没有记录到你的上一次坐标，请先执行 §7!!amt mark§r")
+            return
+        state = self._get_player_state(name) or {}
+        pos_now = state.get("position")
+        dim_now = state.get("dimension")
+        if not pos_now or dim_now is None:
+            source.reply("§4未获取到你的当前位置，请稍后重试")
+            return
+        if dim_now != mark["dim"]:
+            source.reply("§4你当前维度与上次记录的维度不同，请在同一维度内使用")
+            return
+
+        # 拼装上下角点
+        if dim_type == '2d':
+            ctx = {
+                "region_name": context["region_name"],
+                "x1": int(mark["pos"][0]),
+                "z1": int(mark["pos"][2]),
+                "x2": int(pos_now[0]),
+                "z2": int(pos_now[2]),
+                "dimension_id": dim_now,
+                "msg": context["msg"],
+            }
+            self.add_region(source, ctx, '2d')
+        else:  # 3d
+            ctx = {
+                "region_name": context["region_name"],
+                "x1": int(mark["pos"][0]),
+                "y1": int(mark["pos"][1]),
+                "z1": int(mark["pos"][2]),
+                "x2": int(pos_now[0]),
+                "y2": int(pos_now[1]),
+                "z2": int(pos_now[2]),
+                "dimension_id": dim_now,
+                "msg": context["msg"],
+            }
+            self.add_region(source, ctx, '3d')
+
+    def add_from_mark_2d(self, source: CommandSource, context: CommandContext):
+        self._add_from_mark(source, context, '2d')
+
+    def add_from_mark_3d(self, source: CommandSource, context: CommandContext):
+        self._add_from_mark(source, context, '3d')
 
     # add 命令
     def add_region(self, source: CommandSource, context: CommandContext, dimension_type: str):
@@ -222,6 +418,11 @@ class CommandActions:
             return
 
         title, subtitle, actionbar, msg = self.parse_region_message(context["msg"])
+
+        # 维度ID规范化：原版别名会被规范化；其他维度保持原样以兼容模组/自定义维度
+        raw_dim = str(context["dimension_id"]).strip()
+        dim_key = raw_dim.lower()
+        dim_id = self._VANILLA_DIM_ALIASES.get(dim_key, raw_dim)
 
         position = {
             "from": [context["x1"], context["z1"]] if dimension_type == '2d' else [context["x1"], context["y1"], context["z1"]],
@@ -233,7 +434,8 @@ class CommandActions:
             {
                 "shape": 0 if dimension_type == '2d' else 1,
                 "pos": position,
-                "dimension_id": context["dimension_id"],
+                # 统一保存为规范ID（原版别名会转换）
+                "dimension_id": dim_id,
                 "msg": {
                     "title": title,
                     "subtitle": subtitle,
@@ -245,6 +447,8 @@ class CommandActions:
         source.reply(f"区域 §7{context['region_name']} §r添加(修改)成功！")
 
     def parse_region_message(self, msg):
+        # 用户输入支持 &amt&，保存前先转成 §
+        msg = amt_to_section(msg)
         title = self.extract_first_match(re.findall(r"\[([^]]+)]", msg))
         subtitle = self.extract_first_match(re.findall(r"\(([^)]+)\)", msg))
         actionbar = self.extract_first_match(re.findall(r"#([^#]+)#", msg))
@@ -301,11 +505,12 @@ class CommandActions:
         for num, i in enumerate(
             self.data_editor.list()[context["region_name"]]["msg"]["msg"]
         ):
+            display_text = section_to_amt(i)
             msg_rtext.append(
-                RText(f"{num + 1}. {i}")
+                RText(f"{num + 1}. {display_text}")
                 .c(
                     RAction.suggest_command,
-                    f"!!amt msg {context['region_name']} editline {num + 1} {i}",
+                    f"!!amt msg {context['region_name']} editline {num + 1} {display_text}",
                 )
                 .h("修改此条消息")
             )
@@ -342,13 +547,12 @@ class CommandActions:
         if context["region_name"] not in self.data_editor.list().keys():
             source.reply(f"§4无法找到区域 {context['region_name']} ！")
             return
-
         def addline(msg: str, line_num: int = 0):
             region = self.data_editor.list()[context["region_name"]]
             if line_num > 0:
-                region["msg"]["msg"].insert(line_num - 1, msg)
+                region["msg"]["msg"].insert(line_num - 1, amt_to_section(msg))
             else:
-                region["msg"]["msg"].append(msg)
+                region["msg"]["msg"].append(amt_to_section(msg))
             return region
 
         if "line_number" in context.keys():
@@ -372,7 +576,7 @@ class CommandActions:
             source.reply(f"§4无法找到区域 {context['region_name']} ！")
             return
         region = self.data_editor.list()[context["region_name"]]
-        region["msg"]["msg"][context["line_number"] - 1] = context["line_msg"]
+        region["msg"]["msg"][context["line_number"] - 1] = amt_to_section(context["line_msg"]) 
         self.data_editor.add(context["region_name"], region)
         source.reply(self.msg_list(context))
 

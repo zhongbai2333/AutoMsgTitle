@@ -8,6 +8,8 @@ class Config(Serializable):
     permission: Dict[str, int] = {
         "help": 0,
         "list": 0,
+        "viz": 2,
+        "mark": 3,
         "add": 3,
         "del": 3,
         "move": 2,
@@ -17,5 +19,3 @@ class Config(Serializable):
     debug: bool = False
     afk_time: float = 300  # second
     back_region: float = 30  # second
-    refresh_pos_time: float = 1 # second
-    bot_prefix: str = "bot_"
